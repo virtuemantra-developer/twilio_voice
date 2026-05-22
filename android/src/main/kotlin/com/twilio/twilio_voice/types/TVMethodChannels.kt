@@ -49,7 +49,8 @@ enum class TVMethodChannels(val method: String) {
     IS_REJECTING_CALL_ON_NO_PERMISSIONS("isRejectingCallOnNoPermissions"),
     UPDATE_CALLKIT_ICON("updateCallKitIcon"),
     CONNECT("connect"),
-    SHARE_LOGS("shareLogs");
+    SHARE_LOGS("SHARE_LOGS");
+    GET_LOG_FILE_PATH("GET_LOG_FILE_PATH");
 
     companion object {
         private val map = TVMethodChannels.values().associateBy(TVMethodChannels::method)
