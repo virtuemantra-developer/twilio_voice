@@ -68,6 +68,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
     ActivityAware, NewIntentListener, RequestPermissionsResultListener {
 
     private val TAG = "TwilioVoicePlugin"
+    private lateinit var fileLogger: FileLogger
 
     // Locals
     private var fcmToken: String? = null
@@ -118,6 +119,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
         context: Context
     ) {
         Log.d(TAG, "register(BinaryMessenger")
+        fileLogger.log(TAG, "register(BinaryMessenger")
         plugin.methodChannel = MethodChannel(messenger, "$kCHANNEL_NAME/messages")
         plugin.methodChannel!!.setMethodCallHandler(plugin)
         plugin.eventChannel = EventChannel(messenger, "$kCHANNEL_NAME/events")
@@ -128,6 +130,32 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
         plugin.storage = StorageImpl(context)
     }
 
+
+    private fun shareLogs(): Boolean {
+        return try {
+            val logDir = File(context?.getExternalFilesDir(null), "logs")
+            val latestLog = logDir.listFiles()?.maxByOrNull { it.lastModified() }
+
+            if (latestLog != null && latestLog.exists()) {
+                val logContent = latestLog.readText()
+
+                // Create a share intent
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, logContent)
+                    putExtra(Intent.EXTRA_SUBJECT, "Twilio Voice Debug Logs - ${latestLog.name}")
+                }
+                activity?.startActivity(Intent.createChooser(shareIntent, "Share Logs"))
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sharing logs: ${e.message}")
+            false
+        }
+    }
+
     //region Flutter FlutterPlugin
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPluginBinding) {
         register(
@@ -136,10 +164,14 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
             flutterPluginBinding.applicationContext
         )
         hasStarted = true
+        // Initialize file logger
+        fileLogger = FileLogger.getInstance(flutterPluginBinding.applicationContext)
+        fileLogger.log(TAG, "\n\nTwilioVoicePlugin attached to engine")
     }
 
     override fun onDetachedFromEngine(binding: FlutterPluginBinding) {
         Log.d(TAG, "Detached from Flutter engine")
+        fileLogger.log(TAG, "Detached from Flutter engine")
         context = null
         methodChannel!!.setMethodCallHandler(null)
         methodChannel = null
@@ -181,6 +213,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
              */
             override fun onRinging(call: Call) {
                 Log.d(TAG, "onRinging")
+                fileLogger.log(TAG, "onRinging")
                 // TODO - outgoing call check
                 val list = arrayOf("Ringing", call.from ?: "", call.to ?: "", "Incoming")
                 logEvents("", list)
@@ -188,6 +221,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
 
             override fun onConnectFailure(call: Call, error: CallException) {
                 Log.d(TAG, "Connect failure")
+                fileLogger.log(TAG, "Connect failure")
                 val message = String.format(
                     Locale.getDefault(),
                     "Call Error: %d, %s",
@@ -199,6 +233,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
 
             override fun onConnected(call: Call) {
                 Log.d(TAG, "onConnected")
+                fileLogger.log(TAG, "onConnected")
                 // TODO - outgoing call check
                 val list = arrayOf("Connected", call.from ?: "", call.to ?: "", "Incoming")
                 logEvents("", list)
@@ -206,14 +241,17 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
 
             override fun onReconnecting(call: Call, callException: CallException) {
                 Log.d(TAG, "onReconnecting")
+                fileLogger.log(TAG, "onReconnecting")
             }
 
             override fun onReconnected(call: Call) {
                 Log.d(TAG, "onReconnected")
+                fileLogger.log(TAG, "onReconnected")
             }
 
             override fun onDisconnected(call: Call, error: CallException?) {
                 Log.d(TAG, "Disconnected")
+                fileLogger.log(TAG, "Disconnected")
                 if (error != null) {
                     val message = String.format(
                         Locale.getDefault(),
@@ -236,6 +274,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
         grantResults: IntArray
     ): Boolean {
         Log.d(TAG, "onRequestPermissionsResult: $requestCode")
+        fileLogger.log(TAG, "onRequestPermissionsResult: $requestCode")
 
         if (permissions.isNotEmpty()) {
             permissionResultHandler[requestCode]?.let { handler ->
@@ -248,12 +287,15 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
         if (requestCode == REQUEST_CODE_MICROPHONE) {
             if (permissions.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 Log.d(TAG, "Microphone permission granted")
+                fileLogger.log(TAG, "Microphone permission granted")
                 requestPermissionForMicrophoneForeground(onPermissionResult = { granted ->
                     Log.d(TAG, "onRequestPermissionsResult: Microphone foreground permission granted: $granted");
+                    fileLogger.log(TAG, "onRequestPermissionsResult: Microphone foreground permission granted: $granted");
                 });
                 logEventPermission("Microphone", true)
             } else {
                 Log.d(TAG, "Microphone permission not granted")
+                fileLogger.log(TAG, "Microphone permission not granted")
                 logEventPermission("Microphone", false)
             }
         } /*else if (requestCode == REQUEST_CODE_TELECOM) {
@@ -267,48 +309,60 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
         } */ else if (requestCode == REQUEST_CODE_READ_PHONE_NUMBERS) {
             if (permissions.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 Log.d(TAG, "Read Phone Numbers permission granted")
+                fileLogger.log(TAG, "Read Phone Numbers permission granted")
                 logEventPermission("Read Phone Numbers", true)
             } else {
                 Log.d(TAG, "Read Phone Numbers permission not granted")
+                fileLogger.log(TAG, "Read Phone Numbers permission not granted")
                 logEventPermission("Read Phone Numbers", false)
             }
         } else if (requestCode == REQUEST_CODE_READ_PHONE_STATE) {
             if (permissions.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 Log.d(TAG, "Read Phone State permission granted")
+                fileLogger.log(TAG, "Read Phone State permission granted")
                 logEventPermission("Read Phone State", true)
             } else {
                 Log.d(TAG, "Read Phone State permission not granted")
+                fileLogger.log(TAG, "Read Phone State permission not granted")
                 logEventPermission("Read Phone State", false)
             }
         } else if (requestCode == REQUEST_CODE_CALL_PHONE) {
             if (permissions.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 Log.d(TAG, "Call Phone permission granted")
+                fileLogger.log(TAG, "Call Phone permission granted")
                 logEventPermission("Call Phone", true)
                 requestPermissionForManagingCalls {
                     if(it) {
                         Log.d(TAG, "onRequestPermissionsResult: Manage Calls permission granted");
+                        fileLogger.log(TAG, "onRequestPermissionsResult: Manage Calls permission granted");
                     } else {
                         Log.d(TAG, "onRequestPermissionsResult: Manage Calls permission not granted");
+                        fileLogger.log(TAG, "onRequestPermissionsResult: Manage Calls permission not granted");
                     }
                 }
             } else {
                 Log.d(TAG, "Call Phone permission not granted")
+                fileLogger.log(TAG, "Call Phone permission not granted")
                 logEventPermission("Call Phone State", false)
             }
         } else if (requestCode == REQUEST_CODE_MICROPHONE_FOREGROUND) {
             if (permissions.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 Log.d(TAG, "Microphone foreground permission granted")
+                fileLogger.log(TAG, "Microphone foreground permission granted")
                 logEventPermission("Microphone", true)
             } else {
                 Log.d(TAG, "Microphone foreground permission not granted")
+                fileLogger.log(TAG, "Microphone foreground permission not granted")
                 logEventPermission("Microphone", false)
             }
         } else if (requestCode == REQUEST_CODE_MANAGE_CALLS) {
             if (permissions.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 Log.d(TAG, "Manage Calls permission granted")
+                fileLogger.log(TAG, "Manage Calls permission granted")
                 logEventPermission("Manage Calls", true)
             } else {
                 Log.d(TAG, "Manage Calls permission not granted")
+                fileLogger.log(TAG, "Manage Calls permission not granted")
                 logEventPermission("Manage Calls", false)
             }
         }
@@ -319,11 +373,13 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
     //region Flutter EventChannel.StreamHandler
     override fun onListen(arguments: Any?, events: EventSink?) {
         Log.i(TAG, "Setting event sink")
+        fileLogger.log(TAG, "Setting event sink")
         this.eventSink = events
     }
 
     override fun onCancel(arguments: Any?) {
         Log.i(TAG, "Removing event sink")
+        fileLogger.log(TAG, "Removing event sink")
         eventSink = null
     }
     //endregion
@@ -371,10 +427,12 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                 }
 
                 Log.d(TAG, "Setting up token")
+                fileLogger.log(TAG, "Setting up token")
                 this.accessToken = accessToken
                 this.fcmToken = deviceToken;
 
                 Log.d(TAG, "Registering for call events")
+                fileLogger.log(TAG, "Registering for call events")
                 registerForCallInvites(accessToken, deviceToken)
                 result.success(true)
 
@@ -398,6 +456,11 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
 ////            )
             }
 
+            TVMethodChannels.SHARE_LOGS -> {
+                val shared = shareLogs()
+                result.success(shared)
+            }
+
             TVMethodChannels.SEND_DIGITS -> {
                 val digits = call.argument<String>("digits") ?: run {
                     result.error(
@@ -414,6 +477,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
 
             TVMethodChannels.HANGUP -> {
                 Log.d(TAG, "Hanging up")
+                fileLogger.log(TAG, "Hanging up")
                 hangup()
                 result.success(true)
             }
@@ -434,16 +498,19 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                         result.success(true)
                     } ?: run {
                         Log.e(TAG, "Context is null, cannot toggle speaker")
+                        fileLogger.log(TAG, "Context is null, cannot toggle speaker")
                         result.success(false)
                     }
                 } else {
                     Log.d(TAG, "onMethodCall: Not on call, cannot toggle speaker")
+                    fileLogger.log(TAG, "onMethodCall: Not on call, cannot toggle speaker")
                     result.success(false)
                 }
             }
 
             TVMethodChannels.IS_ON_SPEAKER -> {
                 Log.d(TAG, "isSpeakerOn invoked")
+                fileLogger.log(TAG, "isSpeakerOn invoked")
                 result.success(isSpeakerOn)
             }
 
@@ -463,16 +530,19 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                         result.success(true)
                     } ?: run {
                         Log.e(TAG, "Context is null, cannot toggle bluetooth")
+                        fileLogger.log(TAG, "Context is null, cannot toggle bluetooth")
                         result.success(false)
                     }
                 } else {
                     Log.d(TAG, "onMethodCall: Not on call, cannot toggle bluetooth")
+                    fileLogger.log(TAG, "onMethodCall: Not on call, cannot toggle bluetooth")
                     result.success(false)
                 }
             }
 
             TVMethodChannels.IS_BLUETOOTH_ON -> {
                 Log.d(TAG, "isBluetoothOn invoked")
+                fileLogger.log(TAG, "isBluetoothOn invoked")
                 result.success(isBluetoothOn)
             }
 
@@ -492,16 +562,19 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                         result.success(true)
                     } ?: run {
                         Log.e(TAG, "Context is null, cannot toggle mute")
+                        fileLogger.log(TAG, "Context is null, cannot toggle mute")
                         result.success(false)
                     }
                 } else {
                     Log.d(TAG, "onMethodCall: Not on call, cannot toggle mute")
+                    fileLogger.log(TAG, "onMethodCall: Not on call, cannot toggle mute")
                     result.success(false)
                 }
             }
 
             TVMethodChannels.IS_MUTED -> {
                 Log.d(TAG, "isMuted invoked")
+                fileLogger.log(TAG, "isMuted invoked")
                 result.success(isMuted)
             }
 
@@ -539,27 +612,32 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                 }
 
                 Log.d(TAG, "Hold call invoked")
+                fileLogger.log(TAG, "Hold call invoked")
                 if (isOnCall()) {
                     context?.let { ctx ->
                         toggleHold(ctx, shouldHold)
                         result.success(true)
                     } ?: run {
                         Log.e(TAG, "Context is null, cannot toggle hold call")
+                        fileLogger.log(TAG, "Context is null, cannot toggle hold call")
                         result.success(false)
                     }
                 } else {
                     Log.d(TAG, "onMethodCall: Not on call, cannot toggle hold call")
+                    fileLogger.log(TAG, "onMethodCall: Not on call, cannot toggle hold call")
                     result.success(false)
                 }
             }
 
             TVMethodChannels.IS_HOLDING -> {
                 Log.d(TAG, "isHolding call invoked")
+                fileLogger.log(TAG, "isHolding call invoked")
                 result.success(isHolding)
             }
 
             TVMethodChannels.ANSWER -> {
                 Log.d(TAG, "Answering call")
+                fileLogger.log(TAG, "Answering call")
                 answer()
                 result.success(true)
             }
@@ -589,6 +667,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                 }
 
                 Log.d(TAG, "Making new call")
+                fileLogger.log(TAG, "Making new call")
                 logEvent("Making new call")
                 val params = HashMap<String, String>()
                 for ((key, value) in args) {
@@ -618,6 +697,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                     return@onMethodCall
                 }
                 Log.d(TAG, "calling $from -> $to")
+                fileLogger.log(TAG, "calling $from -> $to")
 
                 accessToken?.let { token ->
                     context?.let { ctx ->
@@ -625,6 +705,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                         result.success(success)
                     } ?: run {
                         Log.e(TAG, "Context is null, cannot place call")
+                        fileLogger.log(TAG, "Context is null, cannot place call")
                         result.success(false)
                     }
                 } ?: run {
@@ -647,6 +728,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                 }
 
                 Log.d(TAG, "Making new call via connect")
+                fileLogger.log(TAG, "Making new call via connect")
                 logEvent("Making new call via connect")
                 val params = HashMap<String, String>()
                 for ((key, value) in args) {
@@ -669,6 +751,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                 }
                 val paramsStringify = JSONObject(args).toString()
                 Log.d(TAG, "calling with parameters: from: '$from' -> to: '$to', params: $paramsStringify")
+                fileLogger.log(TAG, "calling with parameters: from: '$from' -> to: '$to', params: $paramsStringify")
 
                 accessToken?.let { token ->
                     context?.let { ctx ->
@@ -676,6 +759,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                         result.success(success)
                     } ?: run {
                         Log.e(TAG, "Context is null, cannot place call")
+                        fileLogger.log(TAG, "Context is null, cannot place call")
                         result.success(false)
                     }
                 } ?: run {
@@ -714,6 +798,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                         TAG,
                         "Storage is null, cannot register client. Has Storage been initialized?"
                     )
+                    fileLogger.log(TAG, "Storage is null, cannot register client. Has Storage been initialized?")
                     result.success(false)
                 }
             }
@@ -736,6 +821,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                         TAG,
                         "Storage is null, cannot unregister client. Has Storage been initialized?"
                     )
+                    fileLogger.log(TAG, "Storage is null, cannot unregister client. Has Storage been initialized?")
                     result.success(false)
                 }
             }
@@ -759,6 +845,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                         TAG,
                         "Storage is null, cannot set default caller. Has Storage been initialized?"
                     )
+                    fileLogger.log(TAG, "Storage is null, cannot set default caller. Has Storage been initialized?")
                     result.success(false)
                 }
             }
@@ -772,6 +859,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                                 TAG,
                                 "No read phone state permission, call `requestReadPhoneStatePermission()` first"
                             )
+                            fileLogger.log(TAG, "No read phone state permission, call `requestReadPhoneStatePermission()` first")
                             result.success(false)
                             return;
                         }
@@ -784,10 +872,12 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                         result.success(phoneAccount != null)
                     } ?: run {
                         Log.e(TAG, "Context is null, cannot check if registered phone account")
+                        fileLogger.log(TAG, "Context is null, cannot check if registered phone account")
                         result.success(false)
                     }
                 } ?: run {
                     Log.e(TAG, "Context is null, cannot check if registered phone account")
+                    fileLogger.log(TAG, "Context is null, cannot check if registered phone account")
                     result.success(false)
                 }
             }
@@ -810,10 +900,12 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                         result.success(true)
                     } ?: run {
                         Log.e(TAG, "TelecomManager is null, cannot change phone account")
+                        fileLogger.log(TAG, "TelecomManager is null, cannot change phone account")
                         result.success(false)
                     }
                 } ?: run {
                     Log.e(TAG, "Activity is null, cannot change phone account")
+                    fileLogger.log(TAG, "Activity is null, cannot change phone account")
                     result.success(false)
                 }
             }
@@ -926,6 +1018,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                         TAG,
                         "Storage is null, cannot set showNotifications. Has Storage been initialized?"
                     )
+                    fileLogger.log(TAG, "Storage is null, cannot set showNotifications. Has Storage been initialized?")
                     result.success(false)
                 }
             }
@@ -957,6 +1050,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
 
                 storage?.let {
                     Log.d(TAG, "onMethodCall: shouldRejectOnNoPermissions is $shouldRejectOnNoPermissions")
+                    fileLogger.log(TAG, "onMethodCall: shouldRejectOnNoPermissions is $shouldRejectOnNoPermissions")
                     it.rejectOnNoPermissions = shouldRejectOnNoPermissions
                     result.success(true)
                 } ?: run {
@@ -964,6 +1058,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                         TAG,
                         "Storage is null, cannot set reject on no permissions. Has Storage been initialized?"
                     )
+                    fileLogger.log(TAG, "Storage is null, cannot set reject on no permissions. Has Storage been initialized?")
                     result.success(false)
                 }
             }
@@ -976,6 +1071,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                         TAG,
                         "Storage is null, cannot set reject on no permissions. Has Storage been initialized?"
                     )
+                    fileLogger.log(TAG, "Storage is null, cannot set reject on no permissions. Has Storage been initialized?")
                     result.success(false)
                 }
             }
@@ -1001,6 +1097,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
             return true
         } ?: run {
             Log.e(TAG, "Context is null. Cannot sendDigits.")
+            fileLogger.log(TAG, "Context is null. Cannot sendDigits.")
             return false
         }
     }
@@ -1014,6 +1111,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
             }
         } ?: run {
             Log.e(TAG, "Context is null. Cannot answer call.")
+            fileLogger.log(TAG, "Context is null. Cannot answer call.")
         }
     }
 
@@ -1026,6 +1124,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
             }
         } ?: run {
             Log.e(TAG, "Context is null. Cannot hangup.")
+            fileLogger.log(TAG, "Context is null. Cannot hangup.")
         }
     }
 
@@ -1103,32 +1202,39 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
         telecomManager?.let { tm ->
             if (!tm.hasCallCapableAccount(ctx, TVConnectionService::class.java.name)) {
                 Log.e(TAG, "No registered phone account, call `registerPhoneAccount()` first")
+                fileLogger.log(TAG, "No registered phone account, call `registerPhoneAccount()` first")
                 return false
             }
             if (!checkMicrophonePermission()) {
                 Log.e(TAG, "No microphone permission, call `requestMicrophonePermission()` first")
+                fileLogger.log(TAG, "No microphone permission, call `requestMicrophonePermission()` first")
                 return false
             }
             if (!checkReadPhoneNumbersPermission()) {
                 Log.e(TAG, "No read phone state permission, call `requestReadPhoneStatePermission()` first")
+                fileLogger.log(TAG, "No read phone state permission, call `requestReadPhoneStatePermission()` first")
                 return false
             }
             if (!checkCallPhonePermission()) {
                 Log.e(TAG, "No call phone permission, call `requestCallPhonePermission()` first")
+                fileLogger.log(TAG, "No call phone permission, call `requestCallPhonePermission()` first")
                 return false
             }
             if (!checkManageOwnCallsPermission()) {
                 Log.e(TAG, "No manage own calls permission, call `requestManageOwnCallsPermission()` first")
+                fileLogger.log(TAG, "No manage own calls permission, call `requestManageOwnCallsPermission()` first")
                 return false
             }
 
             val callParams = HashMap<String, String>(params)
             if (params[Constants.PARAM_TO] == null) {
                 Log.w(TAG, "Call parameters must include '${Constants.PARAM_TO}', removing...")
+                fileLogger.log(TAG, "Call parameters must include '${Constants.PARAM_TO}', removing...")
                 callParams.remove(Constants.PARAM_TO)
             }
             if (params[Constants.PARAM_FROM] == null) {
                 Log.w(TAG, "Call parameters must include '${Constants.PARAM_FROM}', removing...")
+                fileLogger.log(TAG, "Call parameters must include '${Constants.PARAM_FROM}', removing...")
                 callParams.remove(Constants.PARAM_FROM)
             }
 
@@ -1151,6 +1257,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
             return true
         } ?: run {
             Log.e(TAG, "TelecomManager is null, cannot place call")
+            fileLogger.log(TAG, "TelecomManager is null, cannot place call")
             return false
         }
     }
@@ -1200,6 +1307,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
 
                 if (!tm.canReadPhoneNumbers(ctx)) {
                     Log.e(TAG, "hasRegisteredPhoneAccount: No read phone numbers permission, call `requestReadPhoneNumbersPermission()` first")
+                    fileLogger.log(TAG, "hasRegisteredPhoneAccount: No read phone numbers permission, call `requestReadPhoneNumbersPermission()` first")
                     return false
                 }
 
@@ -1208,10 +1316,12 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                 if (phoneAccount != null) {
                     if (!phoneAccount.isEnabled) {
                         Log.e(TAG, "PhoneAccount is not enabled, prompt user to enable via openPhoneAccountSettings()")
+                        fileLogger.log(TAG, "PhoneAccount is not enabled, prompt user to enable via openPhoneAccountSettings()")
                         // Don't return true - we need to ensure it's enabled
                     } else {
                         // account is ready to use
                         Log.d(TAG, "PhoneAccount already registered and enabled")
+                        fileLogger.log(TAG, "PhoneAccount already registered and enabled")
                         return true
                     }
                 }
@@ -1233,6 +1343,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                 try {
                     tm.registerPhoneAccount(phoneAccount)
                     Log.d(TAG, "PhoneAccount registration initiated successfully")
+                    fileLogger.log(TAG, "PhoneAccount registration initiated successfully")
 
                     // For Xiaomi/Redmi, wait a bit and check registration status
                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
@@ -1242,19 +1353,23 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                     return true
                 } catch (e: SecurityException) {
                     Log.e(TAG, "Security exception registering phone account: ${e.message}")
+                    fileLogger.log(TAG, "Security exception registering phone account: ${e.message}")
                     return false
                 } catch (e: Exception) {
                     Log.e(TAG, "Exception registering phone account: ${e.message}")
+                    fileLogger.log(TAG, "Exception registering phone account: ${e.message}")
 
                     // Try Xiaomi-specific fallback
                     return registerPhoneAccountXiaomi(ctx, tm, phoneAccountHandle)
                 }
             } ?: run {
                 Log.e(TAG, "Telecom Manager is null, cannot register phone account")
+                fileLogger.log(TAG, "Telecom Manager is null, cannot register phone account")
                 return false
             }
         } ?: run {
             Log.e(TAG, "Context is null, cannot register phone account")
+            fileLogger.log(TAG, "Context is null, cannot register phone account")
             return false
         }
     }
@@ -1283,9 +1398,11 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
             )
             method.invoke(tm, account)
             Log.d(TAG, "Xiaomi fallback registration successful")
+            fileLogger.log(TAG, "Xiaomi fallback registration successful")
             true
         } catch (e: Exception) {
             Log.e(TAG, "Xiaomi fallback registration failed: ${e.message}")
+            fileLogger.log(TAG, "Xiaomi fallback registration failed: ${e.message}")
             false
         }
     }
@@ -1298,16 +1415,24 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
         val account = tm.getPhoneAccount(handle)
         if (account == null) {
             Log.e(TAG, "Registration verification failed - account not found")
+            fileLogger.log(TAG, "Registration verification failed - account not found")
             Log.e(TAG, "On Xiaomi/Redmi devices, user may need to:")
+            fileLogger.log(TAG, "On Xiaomi/Redmi devices, user may need to:")
             Log.e(TAG, "1. Go to Settings → Apps → Manage apps → Your app")
+            fileLogger.log(TAG, "1. Go to Settings → Apps → Manage apps → Your app")
             Log.e(TAG, "2. Enable 'Display pop-up windows' and 'Autostart'")
+            fileLogger.log(TAG, "2. Enable 'Display pop-up windows' and 'Autostart'")
             Log.e(TAG, "3. Grant 'Phone' permission")
+            fileLogger.log(TAG, "3. Grant 'Phone' permission")
             Log.e(TAG, "4. In Phone app settings, manually enable your account")
+            fileLogger.log(TAG, "4. In Phone app settings, manually enable your account")
         } else if (!account.isEnabled) {
             Log.w(TAG, "Account registered but disabled - need user to enable")
+            fileLogger.log(TAG, "Account registered but disabled - need user to enable")
             openPhoneAccountSettings(activity ?: ctx)
         } else {
             Log.d(TAG, "Account verified and enabled successfully")
+            fileLogger.log(TAG, "Account verified and enabled successfully")
         }
     }
 
@@ -1326,15 +1451,18 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
     private fun registerForCallInvites(accessToken: String, fcmToken: String): Boolean {
         if (fcmToken.isEmpty()) {
             Log.e(TAG, "FCM token is empty, unable to register")
+            fileLogger.log(TAG, "FCM token is empty, unable to register")
             return false
         }
         if (accessToken.isEmpty()) {
             Log.e(TAG, "Access token is empty, unable to register")
+            fileLogger.log(TAG, "Access token is empty, unable to register")
             return false
         }
         val registrationListener: RegistrationListener = object : RegistrationListener {
             override fun onRegistered(accessToken: String, fcmToken: String) {
                 Log.d(TAG, "Successfully registered FCM $fcmToken")
+                fileLogger.log(TAG, "Successfully registered FCM $fcmToken")
             }
 
             override fun onError(
@@ -1348,6 +1476,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                     registrationException.message
                 )
                 Log.e(TAG, message)
+                fileLogger.log(TAG, message)
             }
         }
         Voice.register(accessToken, Voice.RegistrationChannel.FCM, fcmToken, registrationListener)
@@ -1360,12 +1489,14 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
      */
     private fun unregisterForCallInvites(accessToken: String) {
         Log.i(TAG, "Un-registering with FCM")
+        fileLogger.log(TAG, "Un-registering with FCM")
         assert(accessToken.isNotEmpty()) { "Twilio Access Token cannot be empty" }
         assert(fcmToken != null) { "FCM token cannot be null" }
         fcmToken?.let {
             val unregistrationListener: UnregistrationListener = object : UnregistrationListener {
                 override fun onUnregistered(accessToken: String?, fcmToken: String?) {
                     Log.d(TAG, "Successfully un-registered FCM $fcmToken")
+                    fileLogger.log(TAG, "Successfully un-registered FCM $fcmToken")
                 }
 
                 override fun onError(
@@ -1379,17 +1510,20 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                         registrationException.message
                     )
                     Log.e(TAG, message)
+                    fileLogger.log(TAG, message)
                 }
             }
             Voice.unregister(accessToken, Voice.RegistrationChannel.FCM, it, unregistrationListener)
         } ?: {
             Log.e(TAG, "FCM token is null, unable to unregister")
+            fileLogger.log(TAG, "FCM token is null, unable to unregister")
         }
     }
 
     //region Flutter ActivityPluginBinding
     override fun onAttachedToActivity(activityPluginBinding: ActivityPluginBinding) {
         Log.d(TAG, "onAttachedToActivity")
+        fileLogger.log(TAG, "onAttachedToActivity")
         activity = activityPluginBinding.activity
         activityPluginBinding.addOnNewIntentListener(this)
         activityPluginBinding.addRequestPermissionsResultListener(this)
@@ -1398,12 +1532,14 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
 
     override fun onDetachedFromActivityForConfigChanges() {
         Log.d(TAG, "onDetachedFromActivityForConfigChanges")
+        fileLogger.log(TAG, "onDetachedFromActivityForConfigChanges")
         unregisterReceiver()
         activity = null
     }
 
     override fun onReattachedToActivityForConfigChanges(activityPluginBinding: ActivityPluginBinding) {
         Log.d(TAG, "onReattachedToActivityForConfigChanges")
+        fileLogger.log(TAG, "onReattachedToActivityForConfigChanges")
         activity = activityPluginBinding.activity
         activityPluginBinding.addRequestPermissionsResultListener(this)
         activityPluginBinding.addOnNewIntentListener(this)
@@ -1412,6 +1548,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
 
     override fun onDetachedFromActivity() {
         Log.d(TAG, "onDetachedFromActivity")
+        fileLogger.log(TAG, "onDetachedFromActivity")
         unregisterReceiver()
         activity = null
     }
@@ -1423,6 +1560,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
         assert(broadcastReceiver != null) { "BroadcastReceiver must not be null, has the plugin been registered?" }
         if (!isReceiverRegistered) {
             Log.d(TAG, "registerReceiver")
+            fileLogger.log(TAG, "registerReceiver")
             val intentFilter = IntentFilter().apply {
                 addAction(TVBroadcastReceiver.ACTION_AUDIO_STATE)
                 addAction(TVBroadcastReceiver.ACTION_ACTIVE_CALL_CHANGED)
@@ -1468,6 +1606,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
     //region Flutter NewIntentListener
     override fun onNewIntent(intent: Intent): Boolean {
         Log.d(TAG, "onNewIntent")
+        fileLogger.log(TAG, "onNewIntent")
         return false
     }
     //endregion
@@ -1535,6 +1674,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
         } else {
             val message = if (prefix.isEmpty()) description else "$prefix$separator$description"
             Log.d(TAG, "logEvent: $message")
+            fileLogger.log(TAG, "logEvent: $message")
             eventSink!!.success(message)
         }
     }
@@ -1542,26 +1682,31 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
 
     private fun checkReadPhoneNumbersPermission(): Boolean {
         Log.d(TAG, "checkReadPhoneNumbersPermission")
+        fileLogger.log(TAG, "checkReadPhoneNumbersPermission")
         return context?.hasReadPhoneNumbersPermission() ?: false
     }
 
     private fun checkMicrophonePermission(): Boolean {
         Log.d(TAG, "checkMicrophonePermission")
+        fileLogger.log(TAG, "checkMicrophonePermission")
         return context?.hasMicrophoneAccess() ?: false
     }
 
     private fun checkReadPhoneStatePermission(): Boolean {
         Log.d(TAG, "checkReadPhoneStatePermission")
+        fileLogger.log(TAG, "checkReadPhoneStatePermission")
         return context?.hasReadPhoneStatePermission() ?: false
     }
 
     private fun checkCallPhonePermission(): Boolean {
         Log.d(TAG, "checkCallPhonePermission")
+        fileLogger.log(TAG, "checkCallPhonePermission")
         return context?.hasCallPhonePermission() ?: false
     }
 
     private fun checkManageOwnCallsPermission(): Boolean {
         Log.d(TAG, "checkManageOwnCallsPermission")
+        fileLogger.log(TAG, "checkManageOwnCallsPermission")
         if(Build.VERSION.SDK_INT <= Build.VERSION_CODES.TIRAMISU) {
             return context?.hasManageOwnCallsPermission() ?: false
         } else {
@@ -1583,6 +1728,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
 
                 if (!tm.canReadPhoneNumbers(ctx)) {
                     Log.e(TAG, "hasRegisteredPhoneAccount: No read phone numbers permission, call `requestReadPhoneNumbersPermission()` first")
+                    fileLogger.log(TAG, "hasRegisteredPhoneAccount: No read phone numbers permission, call `requestReadPhoneNumbersPermission()` first")
                     return false;
                 }
 
@@ -1591,10 +1737,12 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                 }
             } ?: run {
                 Log.e(TAG, "Telecom Manager is null, cannot check if registered phone account")
+                fileLogger.log(TAG, "Telecom Manager is null, cannot check if registered phone account")
                 return false
             }
         } ?: run {
             Log.e(TAG, "Context is null, cannot check if registered phone account")
+            fileLogger.log(TAG, "Context is null, cannot check if registered phone account")
             return false
         }
     }
@@ -1624,6 +1772,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
     private fun requestPermissionForMicrophoneForeground(onPermissionResult: (Boolean) -> Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             Log.d(TAG, "requestPermissionForMicrophoneForeground: Microphone foreground permission automatically requested.");
+            fileLogger.log(TAG, "requestPermissionForMicrophoneForeground: Microphone foreground permission automatically requested.");
             return requestPermissionOrShowRationale(
                 "Microphone Foreground",
                 "Microphone Foreground permission is required to make or receive phone calls on Android 14 and higher.",
@@ -1633,6 +1782,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
             )
         } else {
             Log.d(TAG, "requestPermissionForMicrophoneForeground: Microphone foreground permission skipped.");
+            fileLogger.log(TAG, "requestPermissionForMicrophoneForeground: Microphone foreground permission skipped.");
         }
     }
 
@@ -1643,6 +1793,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
     private fun requestPermissionForManagingCalls(onPermissionResult: (Boolean) -> Unit) {
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.TIRAMISU) {
             Log.d(TAG, "requestPermissionForManagingCalls: Manage own calls automatically requested.");
+            fileLogger.log(TAG, "requestPermissionForManagingCalls: Manage own calls automatically requested.");
             return requestPermissionOrShowRationale(
                 "Manage Calls",
                 "Manage own calls permission.",
@@ -1652,6 +1803,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
             )
         } else {
             Log.d(TAG, "requestPermissionForManagingCalls: Manage own calls permission skipped.");
+            fileLogger.log(TAG, "requestPermissionForManagingCalls: Manage own calls permission skipped.");
         }
     }
 
@@ -1737,6 +1889,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                             TAG,
                             "handleBroadcastIntent: No 'EXTRA_AUDIO_STATE' provided or invalid type, make sure to provide a [CallAudioState]"
                         )
+                        fileLogger.log(TAG, "handleBroadcastIntent: No 'EXTRA_AUDIO_STATE' provided or invalid type, make sure to provide a [CallAudioState]")
                         return
                     }
 
@@ -1760,10 +1913,12 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                         CallAudioState.audioRouteToString(callAudioState.route)
                     }"
                 )
+                fileLogger.log(TAG, "handleBroadcastIntent: Audio state changed to ${CallAudioState.audioRouteToString(callAudioState.route)}")
             }
 
             TVBroadcastReceiver.ACTION_ACTIVE_CALL_CHANGED -> {
                 Log.d(TAG, "handleBroadcastIntent: Active call changed to $callSid")
+                fileLogger.log(TAG, "handleBroadcastIntent: Active call changed to $callSid")
             }
 
             TVBroadcastReceiver.ACTION_INCOMING_CALL -> {
@@ -1774,6 +1929,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                             TAG,
                             "handleBroadcastIntent: No 'EXTRA_CALL_HANDLE' provided or invalid type, make sure to provide a [CallSid]"
                         )
+                        fileLogger.log(TAG, "handleBroadcastIntent: No 'EXTRA_CALL_HANDLE' provided or invalid type, make sure to provide a [CallSid]")
                         return
                     }
                 val callInvite =
@@ -1783,6 +1939,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                                 TAG,
                                 "handleBroadcastIntent: No 'EXTRA_CALL_INVITE' provided or invalid type, make sure to provide a [CallInvite]"
                             )
+                            fileLogger.log(TAG, "handleBroadcastIntent: No 'EXTRA_CALL_INVITE' provided or invalid type, make sure to provide a [CallInvite]")
                             return
                         }
                 val from = callInvite.from ?: ""
@@ -1804,10 +1961,12 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                             TAG,
                             "handleBroadcastIntent: No 'EXTRA_CALL_HANDLE' provided or invalid type, make sure to provide a [String]"
                         )
+                        fileLogger.log(TAG, "handleBroadcastIntent: No 'EXTRA_CALL_HANDLE' provided or invalid type, make sure to provide a [String]")
                         return
                     }
 //                callSid = null
                 Log.d(TAG, "handleBroadcastIntent: Call Ended $callHandle")
+                fileLogger.log(TAG, "handleBroadcastIntent: Call Ended $callHandle")
                 logEvent("", "Call Ended")
             }
 
@@ -1818,6 +1977,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                 isHolding =
                     intent.getBooleanExtra(TVBroadcastReceiver.EXTRA_HOLD_STATE, isHolding).also {
                         Log.d(TAG, "handleBroadcastIntent: Call holding $it")
+                        fileLogger.log(TAG, "handleBroadcastIntent: Call holding $it")
                     }
             }
 
@@ -1831,6 +1991,10 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                             "Reason(s):\n" +
                             "\t${reason.joinToString("\n\t")}"
                 )
+                fileLogger.log(TAG, "handleBroadcastIntent: Incoming call ignored, see reason.\n" +
+                        "Call Handle: $handle\n" +
+                        "Reason(s):\n" +
+                        "\t${reason.joinToString("\n\t")}")
             }
 
             TVNativeCallActions.ACTION_ANSWERED -> {
@@ -1841,6 +2005,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                             TAG,
                             "No 'EXTRA_CALL_INVITE' provided or invalid type, make sure to provide a [CallInvite]"
                         )
+                        fileLogger.log(TAG, "No 'EXTRA_CALL_INVITE' provided or invalid type, make sure to provide a [CallInvite]")
                         return
                     }
                 val ci =
@@ -1850,6 +2015,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                                 TAG,
                                 "No 'EXTRA_CALL_INVITE' provided or invalid type, make sure to provide a [CallInvite]"
                             )
+                            fileLogger.log(TAG, "No 'EXTRA_CALL_INVITE' provided or invalid type, make sure to provide a [CallInvite]")
                             return
                         }
                 val from = ci.from ?: ""
@@ -1869,12 +2035,14 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                         TAG,
                         "handleBroadcastIntent: No 'EXTRA_DTMF_TONE' provided or invalid type."
                     )
+                    fileLogger.log(TAG, "handleBroadcastIntent: No 'EXTRA_DTMF_TONE' provided or invalid type.")
                     return
                 }
 
                 // TODO(cybex-dev): send to Flutter
 //                logEvents(arrayOf("DTMF", dtmf))
                 Log.d(TAG, "handleBroadcastIntent: DTMF $dtmf")
+                fileLogger.log(TAG, "handleBroadcastIntent: DTMF $dtmf")
             }
 
             TVNativeCallActions.ACTION_REJECTED -> {
@@ -1883,35 +2051,42 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
 
             TVNativeCallActions.ACTION_ABORT -> {
                 Log.d(TAG, "handleBroadcastIntent: Abort")
+                fileLogger.log(TAG, "handleBroadcastIntent: Abort")
                 logEvent("", "Call Ended")
             }
 
             TVNativeCallActions.ACTION_HOLD -> {
                 Log.d(TAG, "handleBroadcastIntent: Hold")
+                fileLogger.log(TAG, "handleBroadcastIntent: Hold")
                 logEvent("", "Hold")
             }
 
             TVNativeCallActions.ACTION_UNHOLD -> {
                 Log.d(TAG, "handleBroadcastIntent: Unhold")
+                fileLogger.log(TAG, "handleBroadcastIntent: Unhold")
                 logEvent("", "Unhold")
             }
 
             TVNativeCallEvents.EVENT_CONNECTING -> {
                 Log.d(TAG, "handleBroadcastIntent: Connecting")
+                fileLogger.log(TAG, "handleBroadcastIntent: Connecting")
             }
 
             TVNativeCallEvents.EVENT_RINGING -> {
                 val callHandle =
                     intent.getStringExtra(TVBroadcastReceiver.EXTRA_CALL_HANDLE) ?: run {
                         Log.e(TAG, "No 'EXTRA_CALL_INVITE' provided or invalid type")
+                        fileLogger.log(TAG, "No 'EXTRA_CALL_INVITE' provided or invalid type")
                         return
                     }
                 val from = intent.getStringExtra(TVBroadcastReceiver.EXTRA_CALL_FROM) ?: run {
                     Log.e(TAG, "No 'EXTRA_CALL_FROM' provided or invalid type")
+                    fileLogger.log(TAG, "No 'EXTRA_CALL_FROM' provided or invalid type")
                     return
                 }
                 val to = intent.getStringExtra(TVBroadcastReceiver.EXTRA_CALL_TO) ?: run {
                     Log.e(TAG, "No 'EXTRA_CALL_TO' provided or invalid type")
+                    fileLogger.log(TAG, "No 'EXTRA_CALL_TO' provided or invalid type")
                     return
                 }
                 val direction = intent.getIntExtra(TVBroadcastReceiver.EXTRA_CALL_DIRECTION, -1)
@@ -1929,6 +2104,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                             TAG,
                             "No 'EXTRA_CALL_INVITE' provided or invalid type, make sure to provide a [CallInvite]"
                         )
+                        fileLogger.log(TAG, "No 'EXTRA_CALL_INVITE' provided or invalid type, make sure to provide a [CallInvite]")
                         return
                     }
                 val from = intent.getStringExtra(TVBroadcastReceiver.EXTRA_CALL_FROM) ?: run {
@@ -1936,6 +2112,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                         TAG,
                         "No 'EXTRA_CALL_INVITE' provided or invalid type, make sure to provide a [CallInvite]"
                     )
+                    fileLogger.log(TAG, "No 'EXTRA_CALL_INVITE' provided or invalid type, make sure to provide a [CallInvite]")
                     return
                 }
                 val to = intent.getStringExtra(TVBroadcastReceiver.EXTRA_CALL_TO) ?: run {
@@ -1943,6 +2120,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                         TAG,
                         "No 'EXTRA_CALL_INVITE' provided or invalid type, make sure to provide a [CallInvite]"
                     )
+                    fileLogger.log(TAG, "No 'EXTRA_CALL_INVITE' provided or invalid type, make sure to provide a [CallInvite]")
                     return
                 }
                 val direction = intent.getIntExtra(TVBroadcastReceiver.EXTRA_CALL_DIRECTION, -1)
@@ -1959,6 +2137,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
                 }
                 val message = intent.getStringExtra(CallExceptionExtension.EXTRA_MESSAGE) ?: run {
                     Log.e(TAG, "No 'EXTRA_MESSAGE' provided or invalid type")
+                    fileLogger.log(TAG, "No 'EXTRA_MESSAGE' provided or invalid type")
                     return
                 }
                 logEvent("Call Error: ${code}, $message");
@@ -1987,6 +2166,7 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
 
             else -> {
                 Log.e(TAG, "[VoiceBroadcastReceiver] Received unknown action ${intent.action}")
+                fileLogger.log(TAG, "[VoiceBroadcastReceiver] Received unknown action ${intent.action}")
             }
         }
     }
