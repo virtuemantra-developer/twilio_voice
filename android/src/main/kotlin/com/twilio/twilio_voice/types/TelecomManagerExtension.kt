@@ -203,12 +203,12 @@ object TelecomManagerExtension {
      * @param ctx application context
      * @return PhoneAccountHandle The phone account handle for the app
      */
-    fun TelecomManager.getPhoneAccountHandle(ctx: Context): PhoneAccountHandle {
-        val appName = ctx.appName
-        val componentName = ComponentName(ctx, TVConnectionService::class.java)
-
-        Log.d(TVConnectionService.TAG, "getPhoneAccountHandle: Get PhoneAccountHandle with name: $appName, componentName: $componentName")
-        return PhoneAccountHandle(componentName, appName)
+    // In TelecomManagerExtension.kt
+    fun TelecomManager.getPhoneAccountHandle(context: Context): PhoneAccountHandle {
+        val componentName = ComponentName(context, TVConnectionService::class.java)
+        // Use a unique and consistent ID
+        val accountId = "twilio_voice_account_${context.packageName}"
+        return PhoneAccountHandle(componentName, accountId)
     }
 
     /**

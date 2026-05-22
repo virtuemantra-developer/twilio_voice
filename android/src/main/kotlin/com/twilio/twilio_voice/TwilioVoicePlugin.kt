@@ -1200,44 +1200,114 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
 
                 if (!tm.canReadPhoneNumbers(ctx)) {
                     Log.e(TAG, "hasRegisteredPhoneAccount: No read phone numbers permission, call `requestReadPhoneNumbersPermission()` first")
-                    return false;
+                    return false
                 }
 
-                // Get PhoneAccount, if null it's not registered
-                val phoneAccount = tm.getPhoneAccount(phoneAccountHandle)
+                // Get PhoneAccount, if it exists check if enabled
+                var phoneAccount = tm.getPhoneAccount(phoneAccountHandle)
                 if (phoneAccount != null) {
                     if (!phoneAccount.isEnabled) {
-                        Log.e(
-                            TVConnectionService.TAG,
-                            "onStartCommand: PhoneAccount is not enabled, prompt the user to enable the phone account by opening settings with `openPhoneAccountSettings()`"
-                        )
+                        Log.e(TAG, "PhoneAccount is not enabled, prompt user to enable via openPhoneAccountSettings()")
+                        // Don't return true - we need to ensure it's enabled
+                    } else {
+                        // account is ready to use
+                        Log.d(TAG, "PhoneAccount already registered and enabled")
                         return true
                     }
+                }
 
-                    // account is ready to use
+                // Build proper PhoneAccount with capabilities
+                val label = ctx.applicationInfo.loadLabel(ctx.packageManager).toString()
+                phoneAccount = PhoneAccount.Builder(phoneAccountHandle, label)
+                    .setCapabilities(
+                        PhoneAccount.CAPABILITY_CALL_PROVIDER or      // Can provide calls
+                                PhoneAccount.CAPABILITY_CONNECTION_MANAGER or // Can manage connections
+                                PhoneAccount.CAPABILITY_PLACE_EMERGENCY_CALLS // If your app supports emergency calls
+                    )
+                    .setSupportedUriSchemes(listOf("tel", "sip", "voip"))
+                    .setShortDescription(ctx.getString(R.string.app_name))
+                    .addSupportedUriScheme("tel")
+                    .build()
+
+                // Register the properly built PhoneAccount
+                try {
+                    tm.registerPhoneAccount(phoneAccount)
+                    Log.d(TAG, "PhoneAccount registration initiated successfully")
+
+                    // For Xiaomi/Redmi, wait a bit and check registration status
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                        verifyRegistration(ctx, tm, phoneAccountHandle)
+                    }, 1500)
+
                     return true
+                } catch (e: SecurityException) {
+                    Log.e(TAG, "Security exception registering phone account: ${e.message}")
+                    return false
+                } catch (e: Exception) {
+                    Log.e(TAG, "Exception registering phone account: ${e.message}")
+
+                    // Try Xiaomi-specific fallback
+                    return registerPhoneAccountXiaomi(ctx, tm, phoneAccountHandle)
                 }
-
-                // Get telecom manager
-//                if (!tm.canReadPhoneState(ctx)) {
-//                    Log.e(TAG,"onStartCommand: Permission for READ_PHONE_STATE not granted or requested, call `requestReadPhoneStatePermission()` first")
-//                    return false
-//                }
-
-                if (tm.hasCallCapableAccount(ctx, phoneAccountHandle.componentName.className)) {
-                    Log.w(TAG, "registerPhoneAccount: Phone account already registered, re-registering anyway")
-//                    return true
-                }
-
-                tm.registerPhoneAccount(ctx, phoneAccountHandle)
-                return true;
             } ?: run {
-                Log.e(TAG, "Telecom Manager is null, cannot check if registered phone account")
+                Log.e(TAG, "Telecom Manager is null, cannot register phone account")
                 return false
             }
         } ?: run {
             Log.e(TAG, "Context is null, cannot register phone account")
             return false
+        }
+    }
+
+    // Xiaomi/Redmi specific registration fallback
+    private fun registerPhoneAccountXiaomi(
+        ctx: Context,
+        tm: TelecomManager,
+        handle: PhoneAccountHandle
+    ): Boolean {
+        return try {
+            // On Xiaomi devices, sometimes need to use reflection
+            val label = ctx.applicationInfo.loadLabel(ctx.packageManager).toString()
+            val account = PhoneAccount.Builder(handle, label)
+                .setCapabilities(
+                    PhoneAccount.CAPABILITY_CALL_PROVIDER or
+                            PhoneAccount.CAPABILITY_CONNECTION_MANAGER
+                )
+                .setSupportedUriSchemes(listOf("tel"))
+                .build()
+
+            // Try reflection as fallback
+            val method = TelecomManager::class.java.getDeclaredMethod(
+                "registerPhoneAccount",
+                PhoneAccount::class.java
+            )
+            method.invoke(tm, account)
+            Log.d(TAG, "Xiaomi fallback registration successful")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Xiaomi fallback registration failed: ${e.message}")
+            false
+        }
+    }
+
+    private fun verifyRegistration(
+        ctx: Context,
+        tm: TelecomManager,
+        handle: PhoneAccountHandle
+    ) {
+        val account = tm.getPhoneAccount(handle)
+        if (account == null) {
+            Log.e(TAG, "Registration verification failed - account not found")
+            Log.e(TAG, "On Xiaomi/Redmi devices, user may need to:")
+            Log.e(TAG, "1. Go to Settings → Apps → Manage apps → Your app")
+            Log.e(TAG, "2. Enable 'Display pop-up windows' and 'Autostart'")
+            Log.e(TAG, "3. Grant 'Phone' permission")
+            Log.e(TAG, "4. In Phone app settings, manually enable your account")
+        } else if (!account.isEnabled) {
+            Log.w(TAG, "Account registered but disabled - need user to enable")
+            openPhoneAccountSettings(activity ?: ctx)
+        } else {
+            Log.d(TAG, "Account verified and enabled successfully")
         }
     }
 
