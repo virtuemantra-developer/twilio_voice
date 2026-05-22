@@ -435,14 +435,14 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
 
     //region Flutter MethodCallHandler
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
-        if (call.arguments !is Map<*, *>) {
-            result.error(
-                FlutterErrorCodes.MALFORMED_ARGUMENTS,
-                "Arguments must be a Map<String, Object>",
-                null
-            )
-            return
-        }
+//        if (call.arguments !is Map<*, *>) {
+//            result.error(
+//                FlutterErrorCodes.MALFORMED_ARGUMENTS,
+//                "Arguments must be a Map<String, Object>",
+//                null
+//            )
+//            return
+//        }
         val method: TVMethodChannels?
         try {
             method = TVMethodChannels.fromValue(call.method)
@@ -457,6 +457,13 @@ class TwilioVoicePlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamH
         }
         when (method) {
             TVMethodChannels.TOKENS -> {
+
+                val args = call.arguments as? Map<*, *>
+                if (args == null) {
+                    result.error(FlutterErrorCodes.MALFORMED_ARGUMENTS, "Arguments must be a Map<String, Object>", null)
+                    return
+                }
+
                 val deviceToken = call.argument<String>("deviceToken") ?: run {
                     result.error(
                         FlutterErrorCodes.MALFORMED_ARGUMENTS,
